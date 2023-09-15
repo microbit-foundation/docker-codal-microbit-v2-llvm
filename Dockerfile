@@ -23,42 +23,86 @@ RUN cd /opt/ && \
     rm gcc-arm-none-eabi-10-2020-q4-major-x86_64-linux.tar.bz2
 ENV PATH $PATH:/opt/gcc-arm-none-eabi-10-2020-q4-major/bin
 
-# Installing LLVM
-# TODO: add these steps
+# Installing LLVM. Current version as of writing is "Ubuntu clang version 14.0.0-1ubuntu1.1 Target: x86_64-pc-linux-gnu"
 
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt install -y clang lld llvm && rm -rf /var/lib/apt/lists/*
 
-# GCC paths obtained running "echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v -"
-# TODO: Add more info here, doesn't matter if it's long
+# GCC paths obtained running:       "echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v -"
+# We can fully extract these using: "echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v - 2>&1 | 
+#                                          sed -n '/#include <...> search starts here:/,/End of search list/ {/#include <...> search starts here:/! {/End of search list/!p}}' | 
+#                                          sed 's/^/-I/' | tr '\n' ' '"
+# ARM-GCC Provides a multilib system which locates all header/library locations given the arhitecture on the command line, in this case we give the microbit build flags and view the return. 
+# These need to be passed to clang (latching onto the ARM-GCC multilib system), so it can find the correct include paths for compilation otherwise it will fail. An example of what these will look like is below.
+# Dynamically extracting these paths from the command above may be one of the reasons this breaks in the future upon updating ARM-GCC.
 ARG GCC_INCLUDES="-I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1 -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/arm-none-eabi/thumb/v7e-m+fp/softfp -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/backward -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include-fixed -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include"
 ENV GCC_INCLUDES_ENV=$GCC_INCLUDES
 
-
-# Download and build codal with arm-none-eabi-gcc
+# Default GCC codal build.
 RUN cd /home && \
     git clone https://github.com/lancaster-university/microbit-v2-samples microbit-v2-samples-gcc && \
     cd microbit-v2-samples-gcc && \
     python -c "import pathlib; f = pathlib.Path('codal.json'); f.write_text(f.read_text().replace('master', 'v0.2.59'))" && \
     cat codal.json && \
-    python build.py
-
+    python build.py 
 
 # Download and build codal with llvm
-# TODO: Finish this
 RUN cd /home && \
+    # Adds CMake clang definitions for ease. PR pending.
     git clone https://github.com/Johnn333/microbit-v2-samples-clang microbit-v2-samples-llvm && \
     cd microbit-v2-samples-llvm && \
+    git switch clang-compatibility && \
     # TODO: These steps are needed until target-locked.json in codal-microbit-v2-clang is updated to point to specific commit hashses
     mkdir libraries && cd libraries && \
-    git clone https://github.com/Johnn333/codal-microbit-v2-clang codal-microbit-v2 && \
-    git clone https://github.com/Johnn333/codal-core-clang codal-core  && \
-    git clone https://github.com/Johnn333/codal-nrf52-clang codal-nrf52 && \
+    git clone https://github.com/lancaster-university/codal-microbit-v2 codal-microbit-v2 && \
+    git clone https://github.com/lancaster-university/codal-core codal-core  && \
+    git clone https://github.com/lancaster-university/codal-nrf52 codal-nrf52 && \
+    cd codal-nrf52 && \
+    git submodule init && \ 
+    git submodule update && \
+    cd .. && \
+    # Waiting on SDK changes to be merged
     git clone https://github.com/Johnn333/codal-microbit-nrf5sdk-clang codal-microbit-nrf5sdk && \
     cd codal-microbit-nrf5sdk && \
-    git checkout -b clang-compatibility origin/clang-compatibility && \
-    cd ../codal-nrf52 && \
-    git checkout -b clang-compatiability origin/clang-compatiability && \
-    cd ../..
-    # python build.py
+    git switch clang-compatibility  && \
+    
+    cd /home/microbit-v2-samples-llvm/libraries/codal-microbit-v2 && \
+    
+    # Changing target-locked.json flags. 
+    # Create a script to:
+    # Extract GCC paths, save to INCLUDE_FLAGS
+    # Replace ARM_GCC with Clang to build instead with LLVM.
+    # Replace GCC_ARM with CLANG (Note this is different to above).
+    # Remove -Wl,--no-wchar-size-warning flag from linker_flags.
+    # Add --target=arm-none-eabi to cpu_opts
+    # Add INCLUDE_FLAGS to cpp_flags.
+    echo '#!/bin/bash' > target-update.sh && \
+    echo 'INCLUDE_FLAGS=$(echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v - 2>&1 | \
+                   sed -n "/#include <...> search starts here:/,/End of search list/ {/#include <...> search starts here:/! {/End of search list/!p}}" | \
+                   sed "s/ /-I/" | \
+                   tr "\\n" " ")' >> target-update.sh && \
+    echo 'sed -i "s/ARM_GCC/CLANG/g" target-locked.json' >> target-update.sh && \
+    echo 'sed -i "s/GCC_ARM/CLANG/g" target-locked.json' >> target-update.sh && \
+    echo 'sed -i "s/-Wl,--no-wchar-size-warning //g" target-locked.json' >> target-update.sh && \
+    echo 'sed -i "s/\"cpu_opts\": \"\(.*\)\",/\"cpu_opts\": \"--target=arm-none-eabi \\1",/ target-locked.json' >> target-update.sh && \
+    # Choosing an obscure character (=) as the delimiter here. We dont know what $INCLUDE_FLAGS may contatin
+    echo 'sed -i "s=\"cpp_flags\": \"\(.*\)\",=\"cpp_flags\": \"$INCLUDE_FLAGS \\1\",=" target-locked.json' >> target-update.sh && \
+    
+    echo | cat target-update.sh && \
+    # Give script required permissions, Run it.
+    chmod +x target-update.sh && \
+    ./target-update.sh && \
+    
+    echo | cat target-locked.json && \  
+    
+    cd /home/microbit-v2-samples-llvm && \
+    mkdir build && cd build && \
+    # Run MinSizeRel for highest optimisation and also dump compile_commands.json (For use in clangd browser.)
+    cmake ../ -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_EXPORT_COMPILE_COMMANDS=1 && \
+    make 
+
+
+RUN cd /home/microbit-v2-samples-llvm && \
 
 
 WORKDIR /home/
