@@ -37,6 +37,7 @@ RUN apt update && apt install -y clang lld llvm && rm -rf /var/lib/apt/lists/*
 # Dynamically extracting these paths from the command above may be one of the reasons this breaks in the future upon updating ARM-GCC.
 ARG GCC_INCLUDES="-I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1 -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/arm-none-eabi/thumb/v7e-m+fp/softfp -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/backward -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include-fixed -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include"
 ENV GCC_INCLUDES_ENV=$GCC_INCLUDES
+# NOTE: The above variables ^^^, relating to include paths are not being used. The current system should be more dynamic than this.
 
 # Default GCC codal build.
 RUN cd /home && \
@@ -75,7 +76,7 @@ RUN cd /home && \
     # Replace GCC_ARM with CLANG (Note this is different to above).
     # Remove -Wl,--no-wchar-size-warning flag from linker_flags.
     # Add --target=arm-none-eabi to cpu_opts
-    # Add INCLUDE_FLAGS to cpp_flags.
+    # Add INCLUDE_FLAGS to cpp_flags & c_flags. Add -fshort-enums to both.
     echo '#!/bin/bash' > target-update.sh && \
     echo 'INCLUDE_FLAGS=$(echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v - 2>&1 | \
                    sed -n "/#include <...> search starts here:/,/End of search list/ {/#include <...> search starts here:/! {/End of search list/!p}}" | \
@@ -84,26 +85,35 @@ RUN cd /home && \
     echo 'sed -i "s/ARM_GCC/CLANG/g" target-locked.json' >> target-update.sh && \
     echo 'sed -i "s/GCC_ARM/CLANG/g" target-locked.json' >> target-update.sh && \
     echo 'sed -i "s/-Wl,--no-wchar-size-warning //g" target-locked.json' >> target-update.sh && \
-    echo 'sed -i "s/\"cpu_opts\": \"\(.*\)\",/\"cpu_opts\": \"--target=arm-none-eabi \\1",/ target-locked.json' >> target-update.sh && \
+    echo 'sed -i "s/\"cpu_opts\": \"\(.*\)\",/\"cpu_opts\": \"--target=arm-none-eabi \\1\",/" target-locked.json' >> target-update.sh && \
     # Choosing an obscure character (=) as the delimiter here. We dont know what $INCLUDE_FLAGS may contatin
-    echo 'sed -i "s=\"cpp_flags\": \"\(.*\)\",=\"cpp_flags\": \"$INCLUDE_FLAGS \\1\",=" target-locked.json' >> target-update.sh && \
+    echo 'sed -i "s=\"cpp_flags\": \"\(.*\)\",=\"cpp_flags\": \"-fshort-enums $INCLUDE_FLAGS\\1\",=" target-locked.json' >> target-update.sh && \
+    echo 'sed -i "s=\"c_flags\": \"\(.*\)\",=\"c_flags\": \"-fshort-enums $INCLUDE_FLAGS\\1\",=" target-locked.json' >> target-update.sh && \
     
-    echo | cat target-update.sh && \
     # Give script required permissions, Run it.
     chmod +x target-update.sh && \
     ./target-update.sh && \
-    
-    echo | cat target-locked.json && \  
     
     cd /home/microbit-v2-samples-llvm && \
     mkdir build && cd build && \
     # Run MinSizeRel for highest optimisation and also dump compile_commands.json (For use in clangd browser.)
     cmake ../ -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_EXPORT_COMPILE_COMMANDS=1 && \
-    make 
-
-
-RUN cd /home/microbit-v2-samples-llvm && \
-
+    make || true 
+    # This will have failed upto this point as the link stage will will not work. But libraries have been generated.
+    
+RUN cd /home/microbit-v2-samples-llvm/build && \
+    # Extract the verbose link command 
+    sed -i 's/<CMAKE_CXX_COMPILER>/arm-none-eabi-g++ -v/' ../utils/cmake/toolchains/CLANG/compiler-flags.cmake && \
+    make > link_cmd.txt 2>&1 || true && \
+    
+    echo '#!/bin/bash' > link-exec.sh && \
+    # Copy line beginning with space, this will be our command
+    grep 'collect2' link_cmd.txt | sed -n '/collect2/{p;q;}' >> link-exec.sh && \
+    sed -i '0,/\/collect2/s/\/[^ ]*\/collect2/ld.lld/' link-exec.sh && \
+    echo 'llvm-objcopy -O ihex MICROBIT MICROBIT.hex' >> link-exec.sh && \
+    
+    chmod +x link-exec.sh && \
+    ./link-exec.sh
 
 WORKDIR /home/
 
@@ -113,6 +123,6 @@ WORKDIR /home/
 # Docker ARG or ENV don't expand when using this format, only when using the shell
 # ENTRYPOINT echo "$ENV_VARIABLE"     <-- This expands and cannot take extra user arguments
 # ENTRYPOINT ["echo", $ENV_VARIABLE]  <-- This does not expands, but does take extra user arguments
-ENTRYPOINT ["echo", \
-            "-I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1 -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/arm-none-eabi/thumb/v7e-m+fp/softfp -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/backward -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include-fixed -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include" \
-]
+#ENTRYPOINT ["echo", \
+#            "-I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1 -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/arm-none-eabi/thumb/v7e-m+fp/softfp -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include/c++/10.2.1/backward -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/include-fixed -I/opt/gcc-arm-none-eabi-10-2020-q4-major/bin/../lib/gcc/arm-none-eabi/10.2.1/../../../../arm-none-eabi/include" \
+#]
