@@ -66,7 +66,6 @@ RUN cd /home && \
     git clone https://github.com/Johnn333/codal-microbit-nrf5sdk-clang codal-microbit-nrf5sdk && \
     cd codal-microbit-nrf5sdk && \
     git switch clang-revised && \
-    echo 2 && \ 
     
     cd /home/microbit-v2-samples-llvm/libraries/codal-microbit-v2 && \
     
