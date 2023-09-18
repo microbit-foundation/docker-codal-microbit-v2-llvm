@@ -45,7 +45,7 @@ RUN cd /home && \
     cd microbit-v2-samples-gcc && \
     python -c "import pathlib; f = pathlib.Path('codal.json'); f.write_text(f.read_text().replace('master', 'v0.2.59'))" && \
     cat codal.json && \
-    python build.py 
+    python build.py
 
 # Download and build codal with llvm
 RUN cd /home && \
@@ -65,7 +65,7 @@ RUN cd /home && \
     # Waiting on SDK changes to be merged
     git clone https://github.com/Johnn333/codal-microbit-nrf5sdk-clang codal-microbit-nrf5sdk && \
     cd codal-microbit-nrf5sdk && \
-    git switch cutdown && \
+    git switch clang-revised && \
     echo 2 && \ 
     
     cd /home/microbit-v2-samples-llvm/libraries/codal-microbit-v2 && \
@@ -121,6 +121,20 @@ RUN cd /home/microbit-v2-samples-llvm/build && \
     
     chmod +x link-exec.sh && \
     ./link-exec.sh 
+
+RUN cd /home/ && \
+    # Extract include directories
+    echo '#!/bin/bash' > package-script.sh && \
+    echo 'INCLUDE_DIRS=$(echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v - 2>&1 | \
+                   sed -n "/#include <...> search starts here:/,/End of search list/ {/#include <...> search starts here:/! {/End of search list/!p}}" | \
+                   tr "\\n" " ")' >> package-script.sh && \
+    echo 'LIBRARY_PATH=$(echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v - 2>&1 | \
+                   sed -n "s/^LIBRARY_PATH=\\(.*\\)/\\1/p" | \
+                   sed "s/:/ /g")' >> package-script.sh && \
+    echo 'tar cf archive.tar $INCLUDE_DIRS $LIBRARY_PATH' >> package-script.sh && \
+
+    chmod +x package-script.sh && \
+    ./package-script.sh 
 
 WORKDIR /home/
 
