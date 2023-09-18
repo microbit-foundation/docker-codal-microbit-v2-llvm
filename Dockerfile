@@ -57,15 +57,12 @@ RUN cd /home && \
     mkdir libraries && cd libraries && \
     git clone https://github.com/lancaster-university/codal-microbit-v2 codal-microbit-v2 && \
     git clone https://github.com/lancaster-university/codal-core codal-core  && \
+    git clone https://github.com/microbit-foundation/codal-microbit-nrf5sdk codal-microbit-nrf5sdk && \
     git clone https://github.com/lancaster-university/codal-nrf52 codal-nrf52 && \
     cd codal-nrf52 && \
     git submodule init && \ 
     git submodule update && \
     cd .. && \
-    # Waiting on SDK changes to be merged
-    git clone https://github.com/Johnn333/codal-microbit-nrf5sdk-clang codal-microbit-nrf5sdk && \
-    cd codal-microbit-nrf5sdk && \
-    git switch clang-revised && \
     
     cd /home/microbit-v2-samples-llvm/libraries/codal-microbit-v2 && \
     
