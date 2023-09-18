@@ -65,18 +65,19 @@ RUN cd /home && \
     # Waiting on SDK changes to be merged
     git clone https://github.com/Johnn333/codal-microbit-nrf5sdk-clang codal-microbit-nrf5sdk && \
     cd codal-microbit-nrf5sdk && \
-    git switch clang-compatibility  && \
+    git switch cutdown && \
+    echo 2 && \ 
     
     cd /home/microbit-v2-samples-llvm/libraries/codal-microbit-v2 && \
     
     # Changing target-locked.json flags. 
     # Create a script to:
-    # Extract GCC paths, save to INCLUDE_FLAGS
+    # Extract GCC paths, save to $INCLUDE_FLAGS
     # Replace ARM_GCC with Clang to build instead with LLVM.
     # Replace GCC_ARM with CLANG (Note this is different to above).
     # Remove -Wl,--no-wchar-size-warning flag from linker_flags.
     # Add --target=arm-none-eabi to cpu_opts
-    # Add INCLUDE_FLAGS to cpp_flags & c_flags. Add -fshort-enums to both.
+    # Add $INCLUDE_FLAGS to cpp_flags & c_flags. Add -fshort-enums to both.
     echo '#!/bin/bash' > target-update.sh && \
     echo 'INCLUDE_FLAGS=$(echo | arm-none-eabi-gcc -xc++ -E -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=softfp -v - 2>&1 | \
                    sed -n "/#include <...> search starts here:/,/End of search list/ {/#include <...> search starts here:/! {/End of search list/!p}}" | \
@@ -95,11 +96,16 @@ RUN cd /home && \
     ./target-update.sh && \
     
     cd /home/microbit-v2-samples-llvm && \
+    # BLE Test, left in incase wanting to replicate.
+    # sed -i 's/out_of_box_experience();/ble_test();/' source/main.cpp && \
+    # rm codal.json && \
+    # mv codal.ble.json codal.json && \
+    # sed -i 's/"MICROBIT_BLE_PARTIAL_FLASHING" : 1/"MICROBIT_BLE_PARTIAL_FLASHING" : 0/' codal.json && \
     mkdir build && cd build && \
     # Run MinSizeRel for highest optimisation and also dump compile_commands.json (For use in clangd browser.)
     cmake ../ -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_EXPORT_COMPILE_COMMANDS=1 && \
     make || true 
-    # This will have failed upto this point as the link stage will will not work. But libraries have been generated.
+    # This will have failed upto this point as the link stage will not work. But libraries have been generated.
     
 RUN cd /home/microbit-v2-samples-llvm/build && \
     # Extract the verbose link command 
@@ -107,13 +113,14 @@ RUN cd /home/microbit-v2-samples-llvm/build && \
     make > link_cmd.txt 2>&1 || true && \
     
     echo '#!/bin/bash' > link-exec.sh && \
-    # Copy line beginning with space, this will be our command
+    # Copy line containing "collect2", this invokes arm-none-eabi-ld, this will be our command
     grep 'collect2' link_cmd.txt | sed -n '/collect2/{p;q;}' >> link-exec.sh && \
     sed -i '0,/\/collect2/s/\/[^ ]*\/collect2/ld.lld/' link-exec.sh && \
+    # Objcopy to produce final hex
     echo 'llvm-objcopy -O ihex MICROBIT MICROBIT.hex' >> link-exec.sh && \
     
     chmod +x link-exec.sh && \
-    ./link-exec.sh
+    ./link-exec.sh 
 
 WORKDIR /home/
 
