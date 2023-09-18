@@ -24,3 +24,7 @@ docker run --name llvm microbit-llvm:latest
 docker start llvm
 docker cp llvm:/home/microbit-v2-samples-llvm/build/MICROBIT.hex .
 ```
+To extract the newlib artefact (This will need optimising before sending to browser):
+```
+docker cp llvm:/home/archive.tar .
+```
