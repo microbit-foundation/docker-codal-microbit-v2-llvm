@@ -16,3 +16,15 @@ To jump into a container:
 ```
 docker run -it --rm microbit-llvm
 ```
+
+Steps to extract the hex (Users passing their own main does not work as of now, but this is a good foundation):
+```
+docker build -t "microbit-llvm" .
+docker run --name llvm microbit-llvm:latest
+docker start llvm
+docker cp llvm:/home/microbit-v2-samples-llvm/build/MICROBIT.hex .
+```
+To extract the newlib artefact (This will need optimising before sending to browser):
+```
+docker cp llvm:/home/archive.tar .
+```
